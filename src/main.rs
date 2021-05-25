@@ -1,7 +1,11 @@
 use rustfft::{num_complex::Complex, FftPlanner};
 
 fn main() {
-    let mut file = std::fs::File::open("/Users/jschmidt/Downloads/EAS_test_tone.wav").unwrap();
+    let filename = "EAS_test_tone.wav";
+    let mut file = std::fs::File::open("/Users/jschmidt/Downloads/".to_string() + filename)
+        .unwrap_or_else(|_| {
+            std::fs::File::open("/mnt/c/Users/John/Downloads/".to_string() + filename).unwrap()
+        });
 
     let (header, data) = wav::read(&mut file).unwrap();
 
@@ -10,16 +14,18 @@ fn main() {
         _ => panic!("only supports bit depth of 16"),
     };
 
-    let found_sampling_rate = header.sampling_rate as usize;
-    dbg!(found_sampling_rate);
-    let sample_size = found_sampling_rate.next_power_of_two(); //todo find nearest point of 2^a * 3^b
+    let sampling_rate = header.sampling_rate as usize;
+    dbg!(sampling_rate);
+    let fft_size = sampling_rate.next_power_of_two(); //todo find nearest point of 2^a * 3^b
+    dbg!(fft_size);
+    let sample_size = fft_size * 6;
     dbg!(sample_size);
 
-    let start = found_sampling_rate / 4; //start .25 seconds in for this clip
+    let start = sampling_rate / 4; //start .25 seconds in for this clip
 
     let mut planner = FftPlanner::new();
 
-    let fft = planner.plan_fft_inverse(sample_size);
+    let fft = planner.plan_fft_inverse(fft_size);
 
     // // Real number input
     //let mut fft_input: Vec<_> = data
@@ -34,22 +40,24 @@ fn main() {
         .skip(start)
         .take(sample_size)
         .enumerate()
-        .map(|(sample, &i)| {
-            Complex::new(
-                (f64::from(sample as u32) / f64::from(found_sampling_rate as u32)) as f32,
-                f32::from(i),
-            )
-        })
+        .map(|(_, i)| Complex::new(f32::from(*i), 0.0))
         .collect();
 
     //dbg!(&fft_input[0..20]);
     fft.process(&mut fft_input);
-    for c in fft_input.iter_mut() {
-        c.re /= (sample_size as f32).sqrt();
-        c.im /= (sample_size as f32).sqrt();
+    fft_input.truncate(fft_size / 2);
+    dbg!(fft_input[0]);
+    for (i, c) in fft_input.iter_mut().enumerate() {
+        c.re /= (fft_size as f32).sqrt();
+        c.im /= (fft_size as f32).sqrt();
+
+        if c.im > 30000.0 {
+            println!("{}: {}\t{}", i, c.re, c.im);
+            let hz = (i * sampling_rate) / fft_size;
+            println!("{}", hz);
+        }
     }
     //dbg!(&fft_input[0..20]);
-    println!("plotting");
 
     use plotters::prelude::*;
 
@@ -58,13 +66,30 @@ fn main() {
     drawing_area.fill(&WHITE).unwrap();
 
     let mut chart = ChartBuilder::on(&drawing_area)
-        .build_cartesian_2d(0..100, 0..10000)
+        .margin(5)
+        .caption(filename, ("sans-serif", 30).into_font())
+        .x_label_area_size(30)
+        .y_label_area_size(30)
+        .build_cartesian_2d(0..(sampling_rate / 2) as i32, 0..100_000)
         .unwrap();
+
+    chart.configure_mesh().draw().unwrap();
 
     chart
         .draw_series(LineSeries::new(
-            fft_input.iter().map(|i| (i.re as i32, i.im as i32)),
+            fft_input
+                .iter()
+                .enumerate()
+                .map(|(i, c)| ((i * sampling_rate / fft_size) as i32, c.im as i32)),
             &BLACK,
         ))
+        .unwrap()
+        .label("frequency");
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .border_style(&BLACK)
+        .draw()
         .unwrap();
 }
