@@ -44,6 +44,10 @@ fn main() {
 
     //dbg!(&fft_input[0..20]);
     fft.process(&mut fft_input);
+    for c in fft_input.iter_mut() {
+        c.re /= (sample_size as f32).sqrt();
+        c.im /= (sample_size as f32).sqrt();
+    }
     //dbg!(&fft_input[0..20]);
     println!("plotting");
 
