@@ -35,7 +35,7 @@ fn main() {
 
     let sampling_rate = header.sampling_rate as usize;
     dbg!(sampling_rate);
-    //we are looking for frequencies of approx 2.5khz, so use ~2000
+    //8k gives best results since EAS tones always last at least a second
     let fft_size = (8000usize).next_power_of_two();
     dbg!(fft_size);
     let sample_size = ((sampling_rate / 2) / fft_size + 1) * fft_size; //sliding window of ~1 second
