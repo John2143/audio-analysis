@@ -6,7 +6,7 @@ fn read_wav(filename: &str) -> (wav::Header, Vec<i16>) {
             std::fs::File::open("/mnt/c/Users/John/Downloads/".to_string() + filename).unwrap()
         });
 
-    let (header, data) = wav::read(&mut file).unwrap();
+    let (header, data) = wav::read(&mut file).expect("invalid wav file");
 
     let data = match data {
         wav::BitDepth::Sixteen(v) => v,
@@ -17,16 +17,19 @@ fn read_wav(filename: &str) -> (wav::Header, Vec<i16>) {
 }
 
 fn main() {
-    let filename = "EAS_test_tone.wav";
+    //let filename = "EAS_test_tone.wav";
+    let filename = "eas_file.wav";
+    //let filename = "/mnt/c/Users/John/Downloads/Required Monthly Test.mp3";
 
     let (header, data) = read_wav(filename);
+    println!("done reading wav");
 
     let sampling_rate = header.sampling_rate as usize;
     dbg!(sampling_rate);
-    //we are looking for frequencies of approx 2.5khz, so use 2.5khz * 4
-    let fft_size = (2500usize * 1).next_power_of_two();
+    //we are looking for frequencies of approx 2.5khz, so use 2.5khz * 2
+    let fft_size = (2500usize * 2).next_power_of_two();
     dbg!(fft_size);
-    let sample_size = ((sampling_rate) / fft_size) * fft_size; //sliding window of ~ 2 seconds
+    let sample_size = ((sampling_rate) / fft_size) * fft_size; //sliding window of ~1 second
     dbg!(sample_size);
 
     let mut planner = FftPlanner::new();
@@ -50,8 +53,8 @@ fn main() {
             .map(|(_, i)| Complex::new(f32::from(*i), 0.0))
             .collect();
 
-        let start_secs = start as f32 / sampling_rate as f32;
-        let end_secs = (start + sample_size) as f32 / sampling_rate as f32;
+        let start_secs = start as f32 / sampling_rate as f32 / 2.0;
+        let end_secs = (start + sample_size) as f32 / sampling_rate as f32 / 2.0;
 
         // 0 padding ?
         //fft_input.extend(std::iter::repeat(Complex::new(0.0, 0.0)).take(sample_size));
@@ -64,42 +67,59 @@ fn main() {
             //normalize imaginary part
             c.im /= (fft_size as f32).sqrt();
 
-            let hz = (i as f32 * sampling_rate as f32) / fft_size as f32;
+            let hz = 2.0 * (i as f32 * sampling_rate as f32) / fft_size as f32;
             //transform real part to frequency domain
             c.re = hz;
         }
+
+        //plot(&fft_input, sampling_rate, filename).expect("failed to plot");
+
         fft_input.sort_by(|a, b| b.im.partial_cmp(&a.im).unwrap());
         let median_amplitude75 = fft_input[fft_input.len() / 4].im;
 
         let mut has_2083 = false;
         let mut has_1562 = false;
         let mut has_1000 = false;
+        let mut has_853 = false;
+        let mut has_960 = false;
 
         for c in fft_input.iter().take(5) {
-            if c.re.abs_sub(2083.0) < 5.0 && median_amplitude75 * 2.0 < c.im {
+            if (c.re - 2083.0).abs() < 10.0 {
                 has_2083 = true;
             }
-            if c.re.abs_sub(1562.0) < 5.0 && median_amplitude75 * 2.0 < c.im {
+            if (c.re - 1562.0).abs() < 10.0 {
                 has_1562 = true;
             }
-            if c.re.abs_sub(1000.0) < 3.0 && median_amplitude75 * 2.0 < c.im {
+            if (c.re - 853.0).abs() < 10.0 {
+                has_853 = true;
+            }
+            if (c.re - 960.0).abs() < 10.0 {
+                has_960 = true;
+            }
+            if (c.re - 1000.0).abs() < 5.0 {
                 has_1000 = true;
             }
         }
-        let has_eas = has_2083 && has_1562;
-        if has_eas || has_1000 {
+        let has_eas_low = has_960 && has_853;
+        let has_eas_high = has_2083 && has_1562;
+        if has_eas_low || has_eas_high {
             println!(
-                "#==============#\n{} - {}\nmed amp: {}",
-                start_secs, end_secs, median_amplitude75
+                "#==============#\n{} - {}\n~{}:{}",
+                start_secs,
+                end_secs,
+                //median_amplitude75,
+                start_secs as usize / 60,
+                start_secs as usize % 60,
             );
-            for (i, c) in fft_input.iter().enumerate().take(5) {
-                println!("#{}: {}hz ({})", i + 1, c.re, c.im);
-            }
-            println!("EAS: {}, BLEEP: {}", has_2083 && has_1562, has_1000);
+            //for (i, c) in fft_input.iter().enumerate().take(5) {
+            //println!("#{}: {}hz ({})", i + 1, c.re, c.im);
+            //}
+            println!(
+                "EAS (2khz): {}, EAS: (850hz): {}",
+                has_eas_high, has_eas_low,
+            );
         }
     }
-
-    //plot(&fft_input, sampling_rate, filename).expect("failed to plot");
 }
 
 fn plot(
