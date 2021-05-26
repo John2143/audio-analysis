@@ -26,7 +26,7 @@ fn main() {
     //we are looking for frequencies of approx 2.5khz, so use 2.5khz * 4
     let fft_size = (2500usize * 1).next_power_of_two();
     dbg!(fft_size);
-    let sample_size = ((2 * sampling_rate) / fft_size) * fft_size; //sliding window of ~ 2 seconds
+    let sample_size = ((sampling_rate) / fft_size) * fft_size; //sliding window of ~ 2 seconds
     dbg!(sample_size);
 
     let mut planner = FftPlanner::new();
@@ -40,38 +40,66 @@ fn main() {
     //.take(sample_size)
     //.map(|i| Complex::new(f32::from(*i), 0.0))
     //.collect();
-    let start = 0;
 
-    let mut fft_input: Vec<_> = data
-        .iter()
-        .skip(start)
-        .take(sample_size)
-        .enumerate()
-        .map(|(_, i)| Complex::new(f32::from(*i), 0.0))
-        .collect();
+    for start in (0..(data.len() - sample_size)).step_by(sample_size / 3) {
+        let mut fft_input: Vec<_> = data
+            .iter()
+            .skip(start)
+            .take(sample_size)
+            .enumerate()
+            .map(|(_, i)| Complex::new(f32::from(*i), 0.0))
+            .collect();
 
-    // 0 padding ?
-    //fft_input.extend(std::iter::repeat(Complex::new(0.0, 0.0)).take(sample_size));
+        let start_secs = start as f32 / sampling_rate as f32;
+        let end_secs = (start + sample_size) as f32 / sampling_rate as f32;
 
-    fft.process(&mut fft_input);
-    //this FFT is symmetrical across x = fft_size / 2, so only care about first half
-    fft_input.truncate(fft_size / 2);
+        // 0 padding ?
+        //fft_input.extend(std::iter::repeat(Complex::new(0.0, 0.0)).take(sample_size));
 
-    for (i, c) in fft_input.iter_mut().enumerate() {
-        //normalize imaginary part
-        c.im /= (fft_size as f32).sqrt();
+        fft.process(&mut fft_input);
+        //this FFT is symmetrical across x = fft_size / 2, so only care about first half
+        fft_input.truncate(fft_size / 2);
 
-        let hz = (i as f32 * sampling_rate as f32) / fft_size as f32;
-        //transform real part to frequency domain
-        c.re = hz;
+        for (i, c) in fft_input.iter_mut().enumerate() {
+            //normalize imaginary part
+            c.im /= (fft_size as f32).sqrt();
+
+            let hz = (i as f32 * sampling_rate as f32) / fft_size as f32;
+            //transform real part to frequency domain
+            c.re = hz;
+        }
+        fft_input.sort_by(|a, b| b.im.partial_cmp(&a.im).unwrap());
+        let median_amplitude75 = fft_input[fft_input.len() / 4].im;
+
+        let mut has_2083 = false;
+        let mut has_1562 = false;
+        let mut has_1000 = false;
+
+        for c in fft_input.iter().take(5) {
+            if c.re.abs_sub(2083.0) < 5.0 && median_amplitude75 * 2.0 < c.im {
+                has_2083 = true;
+            }
+            if c.re.abs_sub(1562.0) < 5.0 && median_amplitude75 * 2.0 < c.im {
+                has_1562 = true;
+            }
+            if c.re.abs_sub(1000.0) < 3.0 && median_amplitude75 * 2.0 < c.im {
+                has_1000 = true;
+            }
+        }
+        let has_eas = has_2083 && has_1562;
+        if has_eas || has_1000 {
+            println!(
+                "#==============#\n{} - {}\nmed amp: {}",
+                start_secs, end_secs, median_amplitude75
+            );
+            for (i, c) in fft_input.iter().enumerate().take(5) {
+                println!("#{}: {}hz ({})", i + 1, c.re, c.im);
+            }
+            println!("EAS: {}, BLEEP: {}", has_2083 && has_1562, has_1000);
+        }
     }
 
-    plot(&fft_input, sampling_rate, filename).expect("failed to plot");
-
-    fft_input.sort_by(|a, b| b.im.partial_cmp(&a.im).unwrap());
-    for (i, c) in fft_input.iter().enumerate().take(5) {
-        println!("#{}: {}hz ({})", i + 1, c.re, c.im);
-    }
+    //plot(&fft_input, sampling_rate, filename).expect("failed to plot");
 }
 
 fn plot(
