@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf};
 
 use rustfft::{num_complex::Complex, FftPlanner};
 
@@ -18,6 +18,13 @@ fn read_wav(filename: &str) -> (wav::Header, Vec<i16>) {
     (header, data)
 }
 
+struct Seconds(f32);
+impl Display for Seconds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:02}:{:02.3}", (self.0 as usize) / 60, self.0 % 60.0)
+    }
+}
+
 fn main() {
     //let filename = "EAS_test_tone.wav";
     let filename = "eas_file.wav";
@@ -31,7 +38,7 @@ fn main() {
     //we are looking for frequencies of approx 2.5khz, so use ~2000
     let fft_size = (8000usize).next_power_of_two();
     dbg!(fft_size);
-    let sample_size = ((sampling_rate / 2) / fft_size) * fft_size; //sliding window of ~1 second
+    let sample_size = ((sampling_rate / 2) / fft_size + 1) * fft_size; //sliding window of ~1 second
     dbg!(sample_size);
 
     let mut planner = FftPlanner::new();
@@ -109,12 +116,11 @@ fn main() {
         if has_eas_low || has_eas_high {
             //TODO Start testing finer FFT boundaries.
             println!(
-                "#==============#\n{} - {}\n~{}:{}",
-                start_secs,
-                end_secs,
+                "#==============#\n{} - {} ({})",
+                Seconds(start_secs),
+                Seconds(end_secs),
                 //median_amplitude75,
-                start_secs as usize / 60,
-                start_secs as usize % 60,
+                start_secs,
             );
             // //print top 5 peaks in audio
             //for (i, c) in fft_input.iter().enumerate().take(5) {
@@ -160,7 +166,12 @@ fn plot(
     let mut chart = ChartBuilder::on(&drawing_area)
         .margin(5 * scale)
         .caption(
-            format!("{}: {} - {}", filename, start_secs, end_secs),
+            format!(
+                "{}: {} - {}",
+                filename,
+                Seconds(start_secs),
+                Seconds(end_secs)
+            ),
             ("sans-serif", 30 * scale).into_font(),
         )
         .x_label_area_size(30 * scale)
