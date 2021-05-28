@@ -38,7 +38,7 @@ fn main() {
     //8k gives best results since EAS tones always last at least a second
     let fft_size = (8000usize).next_power_of_two();
     dbg!(fft_size);
-    let sample_size = ((sampling_rate / 2) / fft_size + 1) * fft_size; //sliding window of ~1 second
+    let sample_size = ((sampling_rate) / fft_size + 1) * fft_size; //sliding window of ~1 second
     dbg!(sample_size);
 
     let mut planner = FftPlanner::new();
@@ -62,8 +62,11 @@ fn main() {
         //TODO investigate windowing types
         //https://en.wikipedia.org/wiki/Window_function
 
-        let start_secs = start as f32 / sampling_rate as f32 / 2.0; //TODO why divide 2?
-        let end_secs = (start + sample_size) as f32 / sampling_rate as f32 / 2.0;
+        let tc_offset = 58 * 60 + 40;
+        let tc_offset = tc_offset as f32;
+
+        let start_secs = start as f32 / sampling_rate as f32 / 2.0 + tc_offset; //TODO why divide 2?
+        let end_secs = (start + sample_size) as f32 / sampling_rate as f32 / 2.0 + tc_offset;
 
         //TODO: needs 0 padding?
         //fft_input.extend(std::iter::repeat(Complex::new(0.0, 0.0)).take(sample_size));
@@ -94,6 +97,7 @@ fn main() {
         //let mut has_1000 = false;
         let mut has_853 = false;
         let mut has_960 = false;
+        let mut has_1050 = false;
 
         //look at the top 5 to find any important waveforms
         for c in fft_input.iter().take(5) {
@@ -109,11 +113,14 @@ fn main() {
             if (c.re - 960.0).abs() < 10.0 {
                 has_960 = true;
             }
+            if (c.re - 1050.0).abs() < 4.0 {
+                has_1050 = true;
+            }
         }
 
         let has_eas_low = has_960 && has_853;
         let has_eas_high = has_2083 && has_1562;
-        if has_eas_low || has_eas_high {
+        if has_eas_low || has_eas_high || has_1050 {
             //TODO Start testing finer FFT boundaries.
             println!(
                 "#==============#\n{} - {} ({})",
@@ -127,8 +134,8 @@ fn main() {
             //println!("#{}: {}hz ({})", i + 1, c.re, c.im);
             //}
             println!(
-                "EAS (2khz): {}, EAS: (850hz): {}",
-                has_eas_high, has_eas_low,
+                "EAS (2khz): {}, EAS: (850hz): {}, Weather(1050hz): {}",
+                has_eas_high, has_eas_low, has_1050,
             );
 
             let (fnum, fname) = (file_num, filename.to_string());
