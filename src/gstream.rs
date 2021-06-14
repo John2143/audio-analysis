@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use gstreamer::{prelude::*, ClockTime, ElementFactory, MessageType, MessageView, Pipeline, State};
 
 //can't use path because ToValue path isnt implemented
@@ -34,8 +36,6 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
     out.set_property("location", &"./test.wav").unwrap();
 
     source.connect_pad_added(move |_, pad| {
-        println!("pad added {:?}", pad);
-
         let sink_pads = convert.get_sink_pads();
 
         let first_pad = sink_pads
@@ -55,6 +55,7 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
             return;
         }
 
+        println!("Found output channel:");
         for cap in new_pad_caps.iter() {
             dbg!(cap);
         }
@@ -72,27 +73,54 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
 
     let bus = pipeline.get_bus().unwrap();
 
-    for msg in bus.iter_timed_filtered(
-        ClockTime::none(),
-        &[
-            MessageType::StateChanged,
-            MessageType::Error,
-            MessageType::Eos,
-        ],
-    ) {
-        match msg.view() {
-            MessageView::Eos(eos) => {
-                println!("done reading {:?}", eos);
-                break;
-            }
-            MessageView::Error(e) => {
-                println!("Some kind of error {:?}", e);
-                return Err(());
-            }
+    let is_transcoding = AtomicBool::new(true);
+    crossbeam::thread::scope(|s| {
+        s.spawn(|_| {
+            let time = std::time::Duration::from_secs(2);
+            while is_transcoding.load(Ordering::Relaxed) {
+                let d: Option<ClockTime> = pipeline.query_position();
 
-            _ => {}
+                match d {
+                    Some(time) => {
+                        let dur: ClockTime = pipeline.query_duration().unwrap();
+                        println!("Current time {} / {}     \r", time, dur);
+                    }
+                    None => {}
+                };
+                std::thread::sleep(time);
+            }
+        });
+
+        for msg in bus.iter_timed_filtered(
+            ClockTime::none(),
+            &[
+                MessageType::StateChanged,
+                MessageType::Error,
+                MessageType::Eos,
+            ],
+        ) {
+            match msg.view() {
+                MessageView::Eos(eos) => {
+                    println!("done reading {:?}", eos);
+                    is_transcoding.store(false, Ordering::Relaxed);
+                    break;
+                }
+                MessageView::Error(e) => {
+                    println!("Some kind of error {:?}", e);
+                    is_transcoding.store(false, Ordering::Relaxed);
+                    return Err(());
+                }
+                MessageView::StateChanged(_) => {
+                    //println!("State change {:?}", sc);
+                }
+
+                _ => {}
+            }
         }
-    }
+
+        Ok(())
+    })
+    .unwrap()?;
 
     pipeline.set_state(State::Null).unwrap();
 

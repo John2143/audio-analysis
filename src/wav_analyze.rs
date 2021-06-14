@@ -141,7 +141,8 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
         for (i, c) in fft_input.iter_mut().enumerate() {
             //normalize imaginary part
             //c.im = (c.re * c.re * c.im * c.im).sqrt();
-            c.im /= (fft_size as f32).sqrt();
+            c.re /= (fft_size as f32).sqrt();
+            c.im = c.re;
 
             //transform real part to frequency domain
             let hz = (i as f32 * sampling_rate as f32) / fft_size as f32;
