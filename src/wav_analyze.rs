@@ -26,9 +26,9 @@ pub fn read_wav(filename: &str) -> (Header, RawWav) {
 
     dbg!(data.len());
 
-    let mut f = std::fs::File::create("./generated.wav").expect("cant open output wav");
-    wav::write(header, &wav::BitDepth::ThirtyTwoFloat(data.clone()), &mut f)
-        .expect("cant write output wav");
+    //let mut f = std::fs::File::create("./generated.wav").expect("cant open output wav");
+    //wav::write(header, &wav::BitDepth::ThirtyTwoFloat(data.clone()), &mut f)
+    //.expect("cant write output wav");
 
     (header, data)
 }
@@ -59,7 +59,7 @@ pub fn gen_fake_wav() -> (Header, RawWav) {
 pub struct Seconds(f32);
 impl Display for Seconds {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:02}:{:02.3}", (self.0 as usize) / 60, self.0 % 60.0)
+        write!(f, "{:02}:{:06.3}", (self.0 as usize) / 60, self.0 % 60.0)
     }
 }
 
@@ -75,7 +75,24 @@ pub fn condense_channels(channel_count: u16, v: RawWav) -> RawWav {
         .collect()
 }
 
-pub fn process_wav(filename: &str, header: Header, data: RawWav) {
+pub struct AnalysisInfo {
+    pub sample_size: usize,
+    pub fft_size: usize,
+    pub sample_rate: usize,
+    pub eas: Vec<EasEvent>,
+}
+
+pub struct EasEvent {
+    pub start_sample: usize,
+    pub end_sample: usize,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+
+    pub has_weather: bool,
+    pub has_eas: bool,
+}
+
+pub fn process_wav(_filename: &str, header: Header, data: RawWav) -> AnalysisInfo {
     println!("done reading wav");
 
     let sampling_rate = header.sampling_rate as usize;
@@ -85,10 +102,9 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
     dbg!(data.len());
 
     dbg!(sampling_rate);
-    //8k gives best results since EAS tones always last at least a second
     let fft_size = (8000usize).next_power_of_two();
     dbg!(fft_size);
-    let sample_size = ((sampling_rate) / fft_size + 1) * fft_size; //sliding window of ~1 second
+    let sample_size = ((sampling_rate / 2) / fft_size + 1) * fft_size; //sliding window of ~.5 second
     dbg!(sample_size);
 
     let mut planner = FftPlanner::new();
@@ -97,8 +113,10 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
 
     //TODO: Read bars&tone for calibration
 
-    let mut file_num = 0;
-    for start in (0..(data.len() - sample_size)).step_by(sample_size / 3) {
+    let mut flags = Vec::new();
+
+    //let mut file_num = 0;
+    for start in (0..(data.len() - sample_size)).step_by(sample_size / 8) {
         fn window(value: f32, i: usize, sample_size: usize) -> Complex<f32> {
             let x = i as f32 / sample_size as f32;
             let x = x - 0.5;
@@ -154,8 +172,6 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
 
         //let median_amplitude75 = fft_input[fft_input.len() / 4].im;
 
-        let mut has_2083 = false;
-        let mut has_1562 = false;
         //let mut has_1000 = false;
         let mut has_853 = false;
         let mut has_960 = false;
@@ -163,12 +179,6 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
 
         //look at the top 5 to find any important waveforms
         for c in fft_input.iter().take(5) {
-            if (c.re - 2083.0).abs() < 10.0 {
-                has_2083 = true;
-            }
-            if (c.re - 1562.0).abs() < 10.0 {
-                has_1562 = true;
-            }
             if (c.re - 853.0).abs() < 10.0 {
                 has_853 = true;
             }
@@ -181,8 +191,7 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
         }
 
         let has_eas_low = has_960 && has_853;
-        let has_eas_high = has_2083 && has_1562;
-        if has_eas_low || has_eas_high || has_1050 {
+        if has_eas_low || has_1050 {
             //TODO Start testing finer FFT boundaries.
             println!(
                 "#==============#\n{} - {} ({})",
@@ -196,26 +205,42 @@ pub fn process_wav(filename: &str, header: Header, data: RawWav) {
             //println!("#{}: {}hz ({})", i + 1, c.re, c.im);
             //}
             println!(
-                "EAS (2khz): {}, EAS: (850hz): {}, Weather(1050hz): {}",
-                has_eas_high, has_eas_low, has_1050,
+                "EAS: (850hz): {}, Weather(1050hz): {}",
+                has_eas_low, has_1050,
             );
 
-            let (fnum, fname) = (file_num, filename.to_string());
-            std::thread::spawn(move || {
-                plot(
-                    fft_input.to_vec(),
-                    &format!("{:.03} - {}", &fnum, &fname),
-                    start_secs,
-                    end_secs,
-                )
-                .unwrap();
+            flags.push(EasEvent {
+                start_seconds: start_secs,
+                end_seconds: end_secs,
+                start_sample: start,
+                end_sample: start + sample_size,
+                has_weather: has_1050,
+                has_eas: has_eas_low,
             });
-            file_num += 1;
+
+            //let (fnum, fname) = (file_num, filename.to_string());
+            //std::thread::spawn(move || {
+            //plot(
+            //fft_input.to_vec(),
+            //&format!("{:.03} - {}", &fnum, &fname),
+            //start_secs,
+            //end_secs,
+            //)
+            //.unwrap();
+            //});
+            //file_num += 1;
         }
+    }
+
+    AnalysisInfo {
+        sample_size,
+        fft_size,
+        sample_rate: sampling_rate,
+        eas: flags,
     }
 }
 
-fn plot(
+pub fn plot(
     mut fft_input: Vec<Complex<f32>>,
     filename: &str,
     start_secs: f32,
