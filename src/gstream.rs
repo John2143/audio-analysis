@@ -36,7 +36,7 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
     out.set_property("location", &"./test.wav").unwrap();
 
     source.connect_pad_added(move |_, pad| {
-        let sink_pads = convert.get_sink_pads();
+        let sink_pads = convert.sink_pads();
 
         let first_pad = sink_pads
             .iter()
@@ -48,9 +48,9 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
             return;
         }
 
-        let new_pad_caps = pad.get_current_caps().unwrap();
-        let new_pad_struct = new_pad_caps.get_structure(0).unwrap();
-        let new_pad_type = new_pad_struct.get_name();
+        let new_pad_caps = pad.current_caps().unwrap();
+        let new_pad_struct = new_pad_caps.structure(0).unwrap();
+        let new_pad_type = new_pad_struct.name();
         if !new_pad_type.starts_with("audio/x-raw") {
             return;
         }
@@ -71,7 +71,7 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
         }
     }
 
-    let bus = pipeline.get_bus().unwrap();
+    let bus = pipeline.bus().unwrap();
 
     let is_transcoding = AtomicBool::new(true);
     crossbeam::thread::scope(|s| {
@@ -92,7 +92,7 @@ pub fn read_audio_to_wav(path: &str) -> Result<Vec<(wav::Header, crate::wav_anal
         });
 
         for msg in bus.iter_timed_filtered(
-            ClockTime::none(),
+            ClockTime::NONE,
             &[
                 MessageType::StateChanged,
                 MessageType::Error,

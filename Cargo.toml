@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 crossbeam = "0.8.1"
-gstreamer = "0.16.7"
+gstreamer = "0.17.0"
 plotters = "0.3.1"
 rustfft = "6.0.1"
 wav = "1.0.0"
